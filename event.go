@@ -1,28 +1,31 @@
 package lache
 
-import (
-	"sync"
+import "sync"
+
+type (
+	ItemEvent        string
+	SubHandler       func(params ...any)
+	ItemEventHandler func(k any, event ItemEvent, item interface{})
 )
 
-type SubHandler func(params ...interface{})
-type ItemEventHandler func(k string, event ItemEvent, item Item)
+const (
+	ItemCreate ItemEvent = "CREATE"
+	ItemUpdate ItemEvent = "UPDATE"
+	ItemDelete ItemEvent = "DELETE"
+)
 
-type ItemEvent string
-
-const ItemCreate ItemEvent = "CREATE"
-const ItemUpdate ItemEvent = "UPDATE"
-const ItemDelete ItemEvent = "DELETE"
-
-var handlersRWMutex *sync.RWMutex
-var handlers map[string][]*SubHandler
-var itemEventHandlersRWMutex *sync.RWMutex
-var itemEventHandlers map[string]map[ItemEvent][]*ItemEventHandler
+var (
+	handlersRWMutex          *sync.RWMutex
+	handlers                 map[string][]*SubHandler
+	itemEventHandlersRWMutex *sync.RWMutex
+	itemEventHandlers        map[any]map[ItemEvent][]*ItemEventHandler
+)
 
 func init() {
 	handlersRWMutex = new(sync.RWMutex)
 	handlers = make(map[string][]*SubHandler)
 	itemEventHandlersRWMutex = new(sync.RWMutex)
-	itemEventHandlers = make(map[string]map[ItemEvent][]*ItemEventHandler)
+	itemEventHandlers = make(map[any]map[ItemEvent][]*ItemEventHandler)
 }
 
 // Sub 订阅
@@ -48,7 +51,7 @@ func Unsub(topic string, handler *SubHandler) {
 }
 
 // Pub 发布
-func Pub(topic string, params ...interface{}) {
+func Pub(topic string, params ...any) {
 	defer handlersRWMutex.RUnlock() //释放读锁
 	handlersRWMutex.RLock()         //读锁
 	if _, exist := handlers[topic]; exist {
@@ -59,21 +62,20 @@ func Pub(topic string, params ...interface{}) {
 }
 
 // pubItemEvent 发布缓存项事件
-func pubItemEvent(k string, event ItemEvent, item Item) {
+func pubItemEvent(k any, event ItemEvent, item interface{}) {
 	defer itemEventHandlersRWMutex.RUnlock() //释放读锁
 	itemEventHandlersRWMutex.RLock()         //读锁
 	if _, exist := itemEventHandlers[k]; exist {
 		if data, exist2 := itemEventHandlers[k][event]; exist2 {
 			for _, f := range data {
 				(*f)(k, event, item)
-				return
 			}
 		}
 	}
 }
 
 // SubItemEvent 订阅缓存项事件
-func SubItemEvent(k string, event ItemEvent, handler *ItemEventHandler) {
+func SubItemEvent(k any, event ItemEvent, handler *ItemEventHandler) {
 	defer itemEventHandlersRWMutex.Unlock() //释放写锁
 	itemEventHandlersRWMutex.Lock()         //写锁
 	if _, exist := itemEventHandlers[k]; !exist {
@@ -86,15 +88,26 @@ func SubItemEvent(k string, event ItemEvent, handler *ItemEventHandler) {
 }
 
 // UnsubItemEvent 取消订阅缓存项事件
-func UnsubItemEvent(k string, event ItemEvent, handler *ItemEventHandler) {
+func UnsubItemEvent(k any, event ItemEvent, handler *ItemEventHandler) {
 	defer itemEventHandlersRWMutex.Unlock() //释放写锁
 	itemEventHandlersRWMutex.Lock()         //写锁
 	if _, exist := itemEventHandlers[k]; exist {
 		if _, exist2 := itemEventHandlers[k][event]; exist2 {
-			for i, _ := range itemEventHandlers[k][event] {
-				itemEventHandlers[k][event] = append(itemEventHandlers[k][event][:i], itemEventHandlers[k][event][i+1:]...)
-				return
+			for i, h := range itemEventHandlers[k][event] {
+				if h == handler {
+					itemEventHandlers[k][event] = append(itemEventHandlers[k][event][:i], itemEventHandlers[k][event][i+1:]...)
+					return
+				}
 			}
 		}
+	}
+}
+
+// ClearItemEvent 清空
+func ClearItemEvent(k any) {
+	defer itemEventHandlersRWMutex.Unlock() //释放写锁
+	itemEventHandlersRWMutex.Lock()         //写锁
+	if _, exist := itemEventHandlers[k]; exist {
+		delete(itemEventHandlers, k)
 	}
 }

@@ -1,109 +1,106 @@
 package lache
 
 import (
-	"fmt"
 	"sync"
 	"time"
 )
 
-type Item struct {
-	rwMutex    *sync.RWMutex
-	key        string
-	value      interface{}
-	createdAt  int64       //创建时间
-	updatedAt  int64       //更新时间
-	updatedCnt int         //更新次数
-	Opts       ItemOptions //客户端配置项
-}
+type (
+	ItemMode int
+
+	Item[K any, V any] struct {
+		Mode       ItemMode      //模式 interval 循环更新模式, expire 过期模式
+		Group      string        // 分组
+		Interval   time.Duration // 循环更新时间
+		Expires    time.Duration // 有效期限
+		UpdatedAt  int64         //更新时间
+		CreatedAt  int64         //创建时间
+		UpdatedCnt int           //更新次数
+		rwMutex    *sync.RWMutex
+		key        K
+		value      V
+		updateFunc UpdateFunc
+	}
+
+	ItemOptions struct {
+		Mode       ItemMode      //模式 interval 循环更新模式, expire 过期模式
+		Group      string        // 分组
+		Interval   time.Duration // 循环更新时间
+		Expires    time.Duration // 有效期限
+		UpdateFunc UpdateFunc
+	}
+
+	OptionFunc func(opt *ItemOptions)
+
+	UpdateFunc func() any
+)
+
+const (
+	DefaultGroup = "Default"
+
+	Interval ItemMode = 0 // 定时更新模式
+	Expire   ItemMode = 1 // 过期模式
+	Manual   ItemMode = 2 //手动模式
+)
 
 // Set 更新值
-func (item *Item) Set(v interface{}) {
+func (item *Item[K, V]) Set(v V) {
 	defer item.rwMutex.Unlock()
 	item.rwMutex.Lock()
 	item.value = v
-	item.updatedAt = time.Now().UnixNano()
-	item.updatedCnt++
+	item.UpdatedAt = time.Now().UnixNano()
+	item.UpdatedCnt++
 }
 
-// update 更新值
-func (item *Item) update() {
+// Update 更新值
+func (item *Item[K, V]) Update() bool {
 	defer item.rwMutex.Unlock()
 	item.rwMutex.Lock()
-	if item.Opts.IntervalHandler != nil {
-		item.value = item.Opts.IntervalHandler()
-		fmt.Println("item.value update = ", item.value)
-		item.updatedAt = time.Now().UnixNano()
-		item.updatedCnt++
+	if item.updateFunc != nil {
+		item.value, _ = item.updateFunc().(V)
+		item.UpdatedAt = time.Now().UnixNano()
+		item.UpdatedCnt++
+		return true
 	}
+	return false
 }
 
 // Get 读取
-func (item *Item) Get() interface{} {
+func (item *Item[K, V]) Get() V {
 	defer item.rwMutex.RUnlock()
 	item.rwMutex.RLock()
 	return item.value
 }
 
-// GetString 读字符串
-func (item *Item) GetString() (s string) {
+// GetItem 读取
+func (item *Item[K, V]) GetItem() Item[K, V] {
 	defer item.rwMutex.RUnlock()
 	item.rwMutex.RLock()
-	s, _ = item.value.(string)
-	return
+	return *item
 }
 
-// GetInt 读Int
-func (item *Item) GetInt() (i int) {
-	defer item.rwMutex.RUnlock()
-	item.rwMutex.RLock()
-	i, _ = item.value.(int)
-	return
+func WithMode(m ItemMode) OptionFunc {
+	return func(opt *ItemOptions) {
+		opt.Mode = m
+	}
 }
-
-// GetInt64 读Int64
-func (item *Item) GetInt64() (i64 int64) {
-	defer item.rwMutex.RUnlock()
-	item.rwMutex.RLock()
-	i64, _ = item.value.(int64)
-	return
+func WithInterval(d time.Duration) OptionFunc {
+	return func(opt *ItemOptions) {
+		opt.Interval = d
+	}
 }
-
-// GetStringMap 读 map[string]interface{}
-func (item *Item) GetStringMap() (sm map[string]interface{}) {
-	defer item.rwMutex.RUnlock()
-	item.rwMutex.RLock()
-	sm, _ = item.value.(map[string]interface{})
-	return
+func WithExpires(d time.Duration) OptionFunc {
+	return func(opt *ItemOptions) {
+		opt.Expires = d
+	}
 }
-
-// GetStringMapString 读 map[string]string
-func (item *Item) GetStringMapString() (sms map[string]string) {
-	defer item.rwMutex.RUnlock()
-	item.rwMutex.RLock()
-	sms, _ = item.value.(map[string]string)
-	return
+func WithGroup(g string) OptionFunc {
+	return func(opt *ItemOptions) {
+		opt.Group = g
+	}
 }
-
-// GetStringSlice 读 []string
-func (item *Item) GetStringSlice() (ss []string) {
-	defer item.rwMutex.RUnlock()
-	item.rwMutex.RLock()
-	ss, _ = item.value.([]string)
-	return
-}
-
-// GetIntSlice 读 []int
-func (item *Item) GetIntSlice() (si []int) {
-	defer item.rwMutex.RUnlock()
-	item.rwMutex.RLock()
-	si, _ = item.value.([]int)
-	return
-}
-
-// GetInt64Slice 读 []int
-func (item *Item) GetInt64Slice() (si64 []int64) {
-	defer item.rwMutex.RUnlock()
-	item.rwMutex.RLock()
-	si64, _ = item.value.([]int64)
-	return
+func WithUpdateFunc(f UpdateFunc) OptionFunc {
+	return func(opt *ItemOptions) {
+		opt.UpdateFunc = f
+	}
 }
