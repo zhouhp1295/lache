@@ -98,7 +98,7 @@ func (d *Local) tick() {
 			d.rwMutex.RLock() //读锁
 			for key, item := range d.items {
 				//过期删除
-				if nano > item.expiration {
+				if item.expiration != NotExpired && nano > item.expiration {
 					d.rwMutex.RUnlock() //释放读锁
 					d.rwMutex.Lock()    //加写锁
 					delete(d.items, key)
